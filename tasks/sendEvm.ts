@@ -132,13 +132,26 @@ export async function sendEvm(
         }
 
         // Quote second hop off-chain to avoid calling quoteSend in lzCompose path.
-        // If the fee deviates, the compose may deviate, and the message can be retried with a new quote.
-        const hubOftAddress = await getOAppAddressByEid(HUB_EID, oappConfig, hubHre, oftAddress)
-        const hubOftArtifact = await hubHre.artifacts.readArtifact('OFT')
+        // If the fee deviates, the compose may revert, and the message can be retried with a new quote.
+        // Routing: if from Stargate → second hop via NATIVE_OFT; if from NativeOFT mesh → second hop via STARGATE_POOL
         const hubSigner = (await hubHre.ethers.getSigners())[0]
-        const hubOft = await hubHre.ethers.getContractAt(hubOftArtifact.abi, hubOftAddress, hubSigner)
-        const secondHopQuote = await hubOft.quoteSend(secondHopSendParam, false)
-        logger.info(`Second hop quote: nativeFee=${secondHopQuote.nativeFee.toString()}`)
+        const oftAbi = (await hubHre.artifacts.readArtifact('OFT')).abi
+        let secondHopOftAddress: string
+        if (isFromStargatePool) {
+            // From Stargate → second hop via NATIVE_OFT
+            secondHopOftAddress = await getOAppAddressByEid(HUB_EID, oappConfig, hubHre, oftAddress)
+        } else {
+            const composer = await hubHre.ethers.getContractAt(
+                composerDeployment.abi,
+                composerDeployment.address,
+                hubSigner
+            )
+            // From NativeOFT mesh → second hop via STARGATE_POOL
+            secondHopOftAddress = await composer.STARGATE_POOL()
+        }
+        const secondHopOft = await hubHre.ethers.getContractAt(oftAbi, secondHopOftAddress, hubSigner)
+        const secondHopQuote = await secondHopOft.quoteSend(secondHopSendParam, false)
+        logger.info(`Second hop OFT: ${secondHopOftAddress}, quote: nativeFee=${secondHopQuote.nativeFee.toString()}`)
 
         // Encode HopParams (SendParam + MessagingFee) - amountLD set to 0 as composer overrides with received amount
         finalComposeMsg = hre.ethers.utils.defaultAbiCoder.encode(
