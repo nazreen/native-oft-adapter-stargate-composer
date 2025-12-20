@@ -143,7 +143,117 @@ npx hardhat lz:oft:send --amount 0.001 --src-eid 40232 --to <EVM_RECIPIENT> --ds
 
 ### Multi-Hop Sends (Via Composer)
 
+#### Architecture: Two Meshes Connected by a Hub
+
+This example demonstrates bridging between **two separate OFT meshes** via a **Hub chain**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              MESH ARCHITECTURE                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────┐         ┌───────────────────────────┐
+    │   NativeOFTAdapter Mesh   │         │  StargatePoolNative Mesh  │
+    │                           │         │  (Stargate's native pools)│
+    ├───────────────────────────┤         ├───────────────────────────┤
+    │ • OP Sepolia (OFT)        │         │ • ETH Sepolia             │
+    │ • Base Sepolia (OFT)      │         │ • Avalanche               │
+    │ • ... other chains (OFT)  │         │ • ... other chains        │
+    └─────────────┬─────────────┘         └─────────────┬─────────────┘
+                  │                                     │
+                  │         ┌─────────────────┐         │
+                  │         │    HUB CHAIN    │         │
+                  │         │ (Arb Sepolia)   │         │
+                  │         ├─────────────────┤         │
+                  └────────>│ NativeOFTAdapter│<────────┘
+                            │ StargatePool    │
+                            │ Composer        │
+                            └─────────────────┘
+```
+
+**Key Concepts:**
+
+| Term | Description |
+|------|-------------|
+| **NativeOFTAdapter** | Exists **only on the Hub chain**. Locks/unlocks native ETH and communicates with regular OFTs on peer chains. |
+| **NativeOFTAdapter Mesh** | The NativeOFTAdapter (Hub) + regular OFTs on peer chains. Peers are standard OFTs that mint/burn, NOT NativeOFTAdapters. |
+| **StargatePoolNative Mesh** | Stargate's existing native ETH pools. Already deployed and connected across many chains. |
+| **Hub Chain** | The only chain with both a NativeOFTAdapter AND StargatePoolNative. This is where the Composer lives. |
+| **Composer** | The `NativeStargateComposer` on the Hub that routes tokens between the two meshes. |
+
+**Why a Hub?**
+- NativeOFTAdapter only exists on **one chain** (the Hub) — peer chains have regular OFTs
+- The Hub is special because it has access to **both** your NativeOFTAdapter AND Stargate's pool
+- The Composer bridges the two: receives on one mesh, forwards to the other
+
 These commands route through the NativeStargateComposer on Arbitrum Sepolia hub.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         NativeStargateComposer Flow                             │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  HOME CHAIN                    HUB CHAIN                      SPOKE CHAIN
+  (OP Sepolia)                  (Arbitrum Sepolia)             (ETH Sepolia)
+                                                              
+  ┌─────────┐                   ┌──────────────────┐           ┌─────────────────┐
+  │  MyOFT  │                   │ NativeOFTAdapter │           │ StargatePool    │
+  │  (OFT)  │                   │ (NATIVE_OFT)     │           │ Native          │
+  └────┬────┘                   └────────┬─────────┘           └────────┬────────┘
+       │                                 │                              │
+       │ 1. send()                       │                              │
+       │    composeMsg = HopParams       │                              │
+       │    (SendParam + hopQuote)       │                              │
+       │ ───────────────────────────────>│                              │
+       │                                 │                              │
+       │                        ┌────────▼─────────┐                    │
+       │                        │ NativeStargate   │                    │
+       │                        │ Composer         │                    │
+       │                        │                  │                    │
+       │                        │ 2. lzCompose()   │                    │
+       │                        │    decode params │                    │
+       │                        │    route to      │                    │
+       │                        │    STARGATE_POOL │                    │
+       │                        └────────┬─────────┘                    │
+       │                                 │                              │
+       │                   ┌─────────────▼──────────────┐               │
+       │                   │ StargatePoolNative         │               │
+       │                   │ (STARGATE_POOL)            │               │
+       │                   └─────────────┬──────────────┘               │
+       │                                 │                              │
+       │                                 │ 3. send() to destination     │
+       │                                 │    using pre-quoted fee      │
+       │                                 │ ────────────────────────────>│
+       │                                 │                              │
+       │                                 │                     4. Receive│
+       │                                 │                        native │
+       │                                 │                        ETH    │
+       │                                 │                              ▼
+
+───────────────────────────────────────────────────────────────────────────────────
+  REVERSE FLOW: Stargate → Composer → NativeOFT mesh
+───────────────────────────────────────────────────────────────────────────────────
+
+       │                                 │                              │
+       │                                 │    1. send() from Stargate   │
+       │                                 │<──────────────────────────────
+       │                                 │                              │
+       │                        ┌────────▼─────────┐                    │
+       │                        │ Composer routes  │                    │
+       │                        │ to NATIVE_OFT    │                    │
+       │                        └────────┬─────────┘                    │
+       │                                 │                              │
+       │    2. lzReceive()               │                              │
+       │<────────────────────────────────                               │
+       │                                 │                              │
+       ▼                                 │                              │
+  Receive OFT                            │                              │
+  tokens                                 │                              │
+```
+
+**Routing Logic:**
+- If compose triggered by `NATIVE_OFT` → forward to `STARGATE_POOL`
+- If compose triggered by `STARGATE_POOL` → forward to `NATIVE_OFT`
 
 > **Note:** The second hop fee is quoted off-chain before sending. This avoids calling `quoteSend()` in the `lzCompose` receive path. If the fee deviates significantly, the compose will revert early and the message can be retried with a fresh quote.
 
