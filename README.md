@@ -145,6 +145,8 @@ npx hardhat lz:oft:send --amount 0.001 --src-eid 40232 --to <EVM_RECIPIENT> --ds
 
 These commands route through the NativeStargateComposer on Arbitrum Sepolia hub.
 
+> **Note:** The second hop fee is quoted off-chain before sending. This avoids calling `quoteSend()` in the `lzCompose` receive path. If the fee deviates significantly, the compose will revert early and the message can be retried with a fresh quote.
+
 ```bash
 # OP (Home OFT) to Ethereum (StargatePoolNative)
 pnpm hardhat lz:oft:send \
