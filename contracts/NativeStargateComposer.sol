@@ -9,6 +9,8 @@ import { IOFT, SendParam, MessagingFee } from "@layerzerolabs/oft-evm/contracts/
 import { OFTComposeMsgCodec } from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
 import { IMultiHopComposer, FailedMessage } from "./interfaces/IMultiHopComposer.sol";
 
+struct HopParams { SendParam sendParam; MessagingFee hopQuote; }
+
 /// @notice Multi-hop composer between:
 /// @notice - NativeOFTAdapter (native ETH, e.g. Arbitrum), and
 /// @notice - StargatePoolNative (Stargate, used as a routing hub to any dstEid).
@@ -79,7 +81,7 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
         uint32 srcEid = OFTComposeMsgCodec.srcEid(_message);
         uint256 amount = OFTComposeMsgCodec.amountLD(_message);
         bytes32 srcSender = OFTComposeMsgCodec.composeFrom(_message);
-        bytes memory sendParamEncoded = OFTComposeMsgCodec.composeMsg(_message);
+        bytes memory hopParamsEncoded = OFTComposeMsgCodec.composeMsg(_message);
 
         // Refund path back to source mesh.
         SendParam memory refundSendParam;
@@ -87,39 +89,39 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
         refundSendParam.to = srcSender;
         refundSendParam.amountLD = amount;
 
-        SendParam memory sendParam;
+        HopParams memory hopParams;
 
-        // Decode second-hop SendParam from composeMsg.
-        try this.decodeSendParam(sendParamEncoded) returns (SendParam memory sendParamDecoded) {
-            sendParam = sendParamDecoded;
+        // Decode second-hop HopParams (SendParam + pre-quoted fee) from composeMsg.
+        try this.decodeHopParams(hopParamsEncoded) returns (HopParams memory decoded) {
+            hopParams = decoded;
 
             // Guard against draining old locked funds: cap to actual amount received.
-            sendParam.amountLD = amount;
+            hopParams.sendParam.amountLD = amount;
 
             // Let the target IOFT handle slippage / conversions; we set slippage floor to zero here.
-            sendParam.minAmountLD = 0;
+            hopParams.sendParam.minAmountLD = 0;
         } catch {
             // Decode failed: only refund back to source mesh is possible.
             failedMessages[_guid] = FailedMessage({
                 oft: address(0),
-                sendParam: sendParam,
+                sendParam: hopParams.sendParam,
                 refundOFT: _refundOFT,
                 refundSendParam: refundSendParam,
                 msgValue: msg.value
             });
 
-            emit DecodeFailed(_guid, oft, sendParamEncoded);
+            emit DecodeFailed(_guid, oft, hopParamsEncoded);
             return;
         }
 
-        // Try the second-hop send (NativeOFT <-> StargatePool).
-        try this.send{ value: msg.value }(oft, sendParam) {
+        // Try the second-hop send using pre-quoted fee (NativeOFT <-> StargatePool).
+        try this.send{ value: msg.value }(oft, hopParams.sendParam, hopParams.hopQuote) {
             emit Sent(_guid, oft);
         } catch {
             // Store failure for refund or retry.
             failedMessages[_guid] = FailedMessage({
                 oft: oft,
-                sendParam: sendParam,
+                sendParam: hopParams.sendParam,
                 refundOFT: _refundOFT,
                 refundSendParam: refundSendParam,
                 msgValue: msg.value
@@ -130,24 +132,24 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
         }
     }
 
-    function decodeSendParam(bytes calldata sendParamBytes)
+    function decodeHopParams(bytes calldata hopParamsBytes)
         external
         pure
-        returns (SendParam memory sendParam)
+        returns (HopParams memory hopParams)
     {
-        sendParam = abi.decode(sendParamBytes, (SendParam));
+        hopParams = abi.decode(hopParamsBytes, (HopParams));
     }
 
-    function send(address _oft, SendParam memory _sendParam)
+    function send(address _oft, SendParam memory _sendParam, MessagingFee memory _fee)
         external
         payable
         nonReentrant
     {
         if (msg.sender != address(this)) revert OnlySelf(msg.sender);
-        _send(_oft, _sendParam, 0, tx.origin);
+        _send(_oft, _sendParam, _fee, 0, tx.origin);
     }
 
-    function refund(bytes32 _guid) external payable nonReentrant {
+    function refund(bytes32 _guid, MessagingFee calldata _fee) external payable nonReentrant {
         FailedMessage memory failedMessage = failedMessages[_guid];
         if (failedMessage.refundOFT == address(0)) {
             revert InvalidSendParam(failedMessage.refundSendParam);
@@ -158,6 +160,7 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
         _send(
             failedMessage.refundOFT,
             failedMessage.refundSendParam,
+            _fee,
             failedMessage.msgValue,
             EXECUTOR
         );
@@ -165,7 +168,7 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
         emit Refunded(_guid, failedMessage.refundOFT);
     }
 
-    function retry(bytes32 _guid) external payable nonReentrant {
+    function retry(bytes32 _guid, MessagingFee calldata _fee) external payable nonReentrant {
         FailedMessage memory failedMessage = failedMessages[_guid];
         if (failedMessage.oft == address(0)) {
             revert InvalidSendParam(failedMessage.sendParam);
@@ -176,6 +179,7 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
         _send(
             failedMessage.oft,
             failedMessage.sendParam,
+            _fee,
             failedMessage.msgValue,
             tx.origin
         );
@@ -186,20 +190,18 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
     function _send(
         address _oft,
         SendParam memory _sendParam,
+        MessagingFee memory _fee,
         uint256 _prePaidValue,
         address _refundTo
     ) internal {
         uint256 msgValue = msg.value + _prePaidValue;
 
-        // Quote the actual fee from the OFT
-        MessagingFee memory fee = IOFT(_oft).quoteSend(_sendParam, false);
-
-        uint256 required = _sendParam.amountLD + fee.nativeFee;
+        uint256 required = _sendParam.amountLD + _fee.nativeFee;
         if (msgValue < required) revert InsufficientValue(required, msgValue);
 
         IOFT(_oft).send{ value: required }( // Send exactly what's needed, not excess, as sending excess would trigger a revert for NativeOFTAdapter
             _sendParam,
-            fee,
+            _fee,
             _refundTo
         );
     }

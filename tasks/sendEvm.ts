@@ -115,7 +115,6 @@ export async function sendEvm(
         const composerDeployment = await hubHre.deployments.get('NativeStargateComposer')
         actualTo = composerDeployment.address
 
-        // Encode second-hop SendParam as composeMsg
         // Stargate pools have enforced options, so only add lzReceive gas for non-Stargate destinations
         const isSecondHopToStargate = !!STARGATE_NATIVE_POOLS[dstEid]
         const secondHopOptions = isSecondHopToStargate
@@ -125,29 +124,34 @@ export async function sendEvm(
         const secondHopSendParam = {
             dstEid: dstEid,
             to: addressToBytes32(to),
-            amountLD: 0, // Overwritten by composer with actual received amount
+            amountLD: parseUnits(amount, 18), // Use actual amount for quoting
             minAmountLD: 0,
             extraOptions: secondHopOptions,
             composeMsg: '0x',
             oftCmd: '0x',
         }
+
+        // Quote second hop off-chain to avoid calling quoteSend in receive path
+        const hubOftAddress = await getOAppAddressByEid(HUB_EID, oappConfig, hubHre, oftAddress)
+        const hubOftArtifact = await hubHre.artifacts.readArtifact('OFT')
+        const hubSigner = (await hubHre.ethers.getSigners())[0]
+        const hubOft = await hubHre.ethers.getContractAt(hubOftArtifact.abi, hubOftAddress, hubSigner)
+        const secondHopQuote = await hubOft.quoteSend(secondHopSendParam, false)
+        logger.info(`Second hop quote: nativeFee=${secondHopQuote.nativeFee.toString()}`)
+
+        // Encode HopParams (SendParam + MessagingFee) - amountLD set to 0 as composer overrides with received amount
         finalComposeMsg = hre.ethers.utils.defaultAbiCoder.encode(
-            ['tuple(uint32,bytes32,uint256,uint256,bytes,bytes,bytes)'],
+            ['tuple(tuple(uint32,bytes32,uint256,uint256,bytes,bytes,bytes),tuple(uint256,uint256))'],
             [
                 [
-                    secondHopSendParam.dstEid,
-                    secondHopSendParam.to,
-                    secondHopSendParam.amountLD,
-                    secondHopSendParam.minAmountLD,
-                    secondHopSendParam.extraOptions,
-                    secondHopSendParam.composeMsg,
-                    secondHopSendParam.oftCmd,
+                    [dstEid, addressToBytes32(to), 0, 0, secondHopOptions, '0x', '0x'],
+                    [secondHopQuote.nativeFee, secondHopQuote.lzTokenFee],
                 ],
             ]
         )
         logger.info(`Composer address: ${actualTo}`)
         logger.info(`Second hop to Stargate: ${isSecondHopToStargate}, extraOptions: ${secondHopOptions}`)
-        logger.info(`Encoded composeMsg for second hop to dstEid=${dstEid}`)
+        logger.info(`Encoded HopParams for second hop to dstEid=${dstEid}`)
     }
     let srcEidHre: HardhatRuntimeEnvironment
     try {
