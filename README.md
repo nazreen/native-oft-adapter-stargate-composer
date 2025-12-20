@@ -157,7 +157,6 @@ This example demonstrates bridging between **two separate OFT meshes** via a **H
     │                           │         │  (Stargate's native pools)│
     ├───────────────────────────┤         ├───────────────────────────┤
     │ • OP Sepolia (OFT)        │         │ • ETH Sepolia             │
-    │ • Base Sepolia (OFT)      │         │ • Avalanche               │
     │ • ... other chains (OFT)  │         │ • ... other chains        │
     └─────────────┬─────────────┘         └─────────────┬─────────────┘
                   │                                     │
