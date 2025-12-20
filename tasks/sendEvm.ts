@@ -131,7 +131,8 @@ export async function sendEvm(
             oftCmd: '0x',
         }
 
-        // Quote second hop off-chain to avoid calling quoteSend in receive path
+        // Quote second hop off-chain to avoid calling quoteSend in lzCompose path.
+        // If the fee deviates, the compose may deviate, and the message can be retried with a new quote.
         const hubOftAddress = await getOAppAddressByEid(HUB_EID, oappConfig, hubHre, oftAddress)
         const hubOftArtifact = await hubHre.artifacts.readArtifact('OFT')
         const hubSigner = (await hubHre.ethers.getSigners())[0]

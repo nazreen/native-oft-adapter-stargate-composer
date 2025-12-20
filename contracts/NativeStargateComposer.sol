@@ -9,6 +9,8 @@ import { IOFT, SendParam, MessagingFee } from "@layerzerolabs/oft-evm/contracts/
 import { OFTComposeMsgCodec } from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
 import { IMultiHopComposer, FailedMessage } from "./interfaces/IMultiHopComposer.sol";
 
+/// @dev Second-hop parameters packed in composeMsg. Fee is quoted off-chain to avoid
+/// @dev calling quoteSend() in receive path; if price deviates, send reverts early and can be retried.
 struct HopParams { SendParam sendParam; MessagingFee hopQuote; }
 
 /// @notice Multi-hop composer between:
@@ -149,6 +151,7 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
         _send(_oft, _sendParam, _fee, 0, tx.origin);
     }
 
+    /// @notice Refund failed message back to source. Caller must quote fee off-chain before calling.
     function refund(bytes32 _guid, MessagingFee calldata _fee) external payable nonReentrant {
         FailedMessage memory failedMessage = failedMessages[_guid];
         if (failedMessage.refundOFT == address(0)) {
@@ -168,6 +171,7 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
         emit Refunded(_guid, failedMessage.refundOFT);
     }
 
+    /// @notice Retry failed message to original destination. Caller must quote fee off-chain before calling.
     function retry(bytes32 _guid, MessagingFee calldata _fee) external payable nonReentrant {
         FailedMessage memory failedMessage = failedMessages[_guid];
         if (failedMessage.oft == address(0)) {
