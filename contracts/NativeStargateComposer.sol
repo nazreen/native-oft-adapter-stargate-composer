@@ -34,19 +34,9 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
     error InvalidNativeOFT();
     error InvalidStargatePool();
     error InvalidExecutor();
-    error OnlyEndpoint(address caller);
-    error OnlyOFT(address unexpected);
-    error OnlySelf(address caller);
     error OnlyExecutor(address caller);
-    error InvalidSendParam(SendParam sendParam);
     error InsufficientValue(uint256 required, uint256 available);
     error WithdrawFailed();
-
-    event DecodeFailed(bytes32 guid, address targetOFT, bytes encodedSendParam);
-    event Sent(bytes32 guid, address targetOFT);
-    event SendFailed(bytes32 guid, address targetOFT);
-    event Refunded(bytes32 guid, address refundOFT);
-    event Retried(bytes32 guid, address targetOFT);
 
     constructor(address _nativeOFT, address _stargatePool, address _executor) {
         if (_nativeOFT == address(0)) revert InvalidNativeOFT();
