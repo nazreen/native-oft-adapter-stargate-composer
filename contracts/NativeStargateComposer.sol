@@ -29,9 +29,6 @@ contract NativeStargateComposer is IMultiHopComposer, ReentrancyGuard {
 
     error InvalidNativeOFT();
     error InvalidStargatePool();
-    error InvalidExecutor();
-    error OnlyExecutor(address caller);
-    error InsufficientValue(uint256 required, uint256 available);
     error WithdrawFailed();
 
     constructor(address _nativeOFT, address _stargatePool, address _executor) {

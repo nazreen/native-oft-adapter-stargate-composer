@@ -32,7 +32,10 @@ interface IMultiHopComposer is IOAppComposer {
     error OnlyEndpoint(address caller);
     error OnlySelf(address caller);
     error OnlyOFT(address oft);
+    error OnlyExecutor(address caller);
+    error InvalidExecutor();
     error InvalidSendParam(SendParam sendParam);
+    error InsufficientValue(uint256 required, uint256 available);
 
     /// ========================== GETTERS =====================================
     function ENDPOINT() external view returns (address);
