@@ -42,6 +42,7 @@ interface IMultiHopComposer is IOAppComposer {
     function EXECUTOR() external view returns (address);
 
     /// ========================== FUNCTIONS =====================================
+    function decodeHopParams(bytes calldata hopParamsBytes) external pure returns (HopParams memory);
     function refund(bytes32 guid, MessagingFee calldata fee) external payable;
     function retry(bytes32 guid, MessagingFee calldata fee) external payable;
     function send(address oft, SendParam memory sendParam, MessagingFee memory fee) external payable;
