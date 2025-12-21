@@ -13,6 +13,13 @@ struct FailedMessage {
     uint256 msgValue;
 }
 
+/// @dev Second-hop parameters packed in composeMsg. Fee is quoted off-chain to avoid
+/// @dev calling quoteSend() in receive path; if price deviates, send reverts early and can be retried.
+struct HopParams {
+    SendParam sendParam;
+    MessagingFee hopQuote;
+}
+
 interface IMultiHopComposer is IOAppComposer {
     /// ========================== EVENTS =====================================
     event DecodeFailed(bytes32 indexed guid, address indexed oft, bytes message);

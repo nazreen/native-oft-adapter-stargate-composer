@@ -7,11 +7,7 @@ import { IOAppCore } from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOA
 
 import { IOFT, SendParam, MessagingFee } from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import { OFTComposeMsgCodec } from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
-import { IMultiHopComposer, FailedMessage } from "./interfaces/IMultiHopComposer.sol";
-
-/// @dev Second-hop parameters packed in composeMsg. Fee is quoted off-chain to avoid
-/// @dev calling quoteSend() in receive path; if price deviates, send reverts early and can be retried.
-struct HopParams { SendParam sendParam; MessagingFee hopQuote; }
+import { IMultiHopComposer, FailedMessage, HopParams } from "./interfaces/IMultiHopComposer.sol";
 
 /// @notice Multi-hop composer between:
 /// @notice - NativeOFTAdapter (native ETH, e.g. Arbitrum), and
