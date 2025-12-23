@@ -16,7 +16,7 @@
 
 <p align="center">Template project for getting started with LayerZero's <code>NativeOFTAdapter</code> contract development.</p>
 
-WARNING: this example code is not audited. You should get them audited before deploying to production.
+> ⚠️ **WARNING:** This example code is not audited. You should get it audited before deploying to production.
 
 ## 1) Developing Contracts
 
