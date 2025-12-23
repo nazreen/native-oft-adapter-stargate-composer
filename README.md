@@ -143,6 +143,8 @@ npx hardhat lz:oft:send --amount 0.001 --src-eid 40232 --to <EVM_RECIPIENT> --ds
 
 ### Multi-Hop Sends (Via Composer)
 
+> ⚠️ **WARNING:** The `NativeStargateComposer` contract is not audited. You should get it audited before deploying to production.
+
 #### Architecture: Two Meshes Connected by a Hub
 
 This example demonstrates bridging between **two separate OFT meshes** via a **Hub chain**:
