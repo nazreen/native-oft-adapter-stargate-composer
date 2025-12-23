@@ -256,6 +256,63 @@ These commands route through the NativeStargateComposer on Arbitrum Sepolia hub.
 
 > **Note:** The second hop fee is quoted off-chain before sending. This avoids calling `quoteSend()` in the `lzCompose` receive path. If the fee deviates significantly, the compose will revert early and the message can be retried with a fresh quote.
 
+### Compose Message Layout (HopParams)
+
+When performing a multi-hop send, the `composeMsg` field contains encoded `HopParams` that the Composer decodes to execute the second hop. This structure is VM-agnostic in concept but must be encoded according to each VM's conventions.
+
+```
+┌───────────────────────────────────────── HopParams ─────────────────────────────────────────┐
+│                                                                                             │
+│  ┌──────────────────────────────── SendParam ────────────────────────────────┐ ┌─────────┐  │
+│  │                                                                           │ │Messaging│  │
+│  │ ┌────────┬────────┬──────────┬───────────┬───────────┬─────────┬────────┐ │ │  Fee    │  │
+│  │ │ dstEid │   to   │ amountLD │minAmountLD│ extraOpts │composeMs│ oftCmd │ │ │┌───────┐│  │
+│  │ │        │        │          │           │           │         │        │ │ ││native ││  │
+│  │ │ 4 B    │ 32 B   │  32 B    │   32 B    │   var B   │  var B  │ var B  │ │ ││Fee    ││  │
+│  │ │        │        │  (= 0)   │   (= 0)   │           │  (= 0x) │ (=0x)  │ │ ││ 32 B  ││  │
+│  │ └────────┴────────┴──────────┴───────────┴───────────┴─────────┴────────┘ │ │├───────┤│  │
+│  │                                                                           │ ││lzToken││  │
+│  │  dstEid     = Final destination endpoint ID                               │ ││Fee    ││  │
+│  │  to         = Final recipient address (zero-padded)                       │ ││ 32 B  ││  │
+│  │  amountLD   = Set to 0; Composer overrides with received amount           │ ││(= 0)  ││  │
+│  │  minAmountLD= Set to 0; Composer handles slippage                         │ │└───────┘│  │
+│  │  extraOpts  = Options for second hop (e.g., lzReceive gas)                │ │         │  │
+│  │  composeMsg = Empty (0x) for final destination                            │ │ 64 B    │  │
+│  │  oftCmd     = Empty (0x)                                                  │ │ total   │  │
+│  │                                                                           │ │         │  │
+│  └───────────────────────────────────────────────────────────────────────────┘ └─────────┘  │
+│                                                                                             │
+│  Key Notes:                                                                                 │
+│  • amountLD = 0 in message → Composer overrides with actual received amount                 │
+│  • Fee is pre-quoted off-chain → Avoids quoteSend() in receive path                         │
+│  • If fee deviates at execution → Send reverts, can be retried via retry()                  │
+│                                                                                             │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Solidity Encoding (EVM)
+
+In `tasks/sendEvm.ts`, the HopParams is ABI-encoded as follows:
+
+```typescript
+// Encode HopParams: tuple of (SendParam, MessagingFee)
+const composeMsg = ethers.utils.defaultAbiCoder.encode(
+    ['tuple(tuple(uint32,bytes32,uint256,uint256,bytes,bytes,bytes),tuple(uint256,uint256))'],
+    [
+        [
+            [dstEid, addressToBytes32(to), 0, 0, secondHopOptions, '0x', '0x'], // SendParam
+            [secondHopQuote.nativeFee, secondHopQuote.lzTokenFee],              // MessagingFee
+        ],
+    ]
+)
+```
+
+The Composer decodes this in Solidity using:
+
+```solidity
+HopParams memory hopParams = abi.decode(hopParamsBytes, (HopParams));
+```
+
 ```bash
 # OP (Home OFT) to Ethereum (StargatePoolNative)
 pnpm hardhat lz:oft:send \
